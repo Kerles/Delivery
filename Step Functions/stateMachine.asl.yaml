@@ -1,0 +1,145 @@
+StartAt: ReceberMensagem
+States:
+  ReceberMensagem:
+    Type: Task
+    Next: ReceberPedido
+    Parameters:
+      QueueUrl: MyData
+    Resource: arn:aws:states:::aws-sdk:sqs:receiveMessage.waitForTaskToken
+  ReceberPedido:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    OutputPath: $.Payload
+    Parameters:
+      FunctionName.$: $arn:aws:lambda:us-east-1:891377177847:function:receberPedido
+      Payload.$: $
+    Retry:
+      - ErrorEquals:
+          - Lambda.ServiceException
+          - Lambda.AWSLambdaException
+          - Lambda.SdkClientException
+          - Lambda.TooManyRequestsException
+        IntervalSeconds: 1
+        MaxAttempts: 3
+        BackoffRate: 2
+    Next: ValidarPedido
+  ValidarPedido:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    OutputPath: $.Payload
+    Parameters:
+      Payload.$: $
+      FunctionName: arn:aws:states:::lambda:invoke
+    Retry:
+      - ErrorEquals:
+          - Lambda.ServiceException
+          - Lambda.AWSLambdaException
+          - Lambda.SdkClientException
+          - Lambda.TooManyRequestsException
+        IntervalSeconds: 1
+        MaxAttempts: 3
+        BackoffRate: 2
+    Next: ArmazenarPedido
+  ArmazenarPedido:
+    Type: Task
+    Next: metadados do pedido
+    Parameters:
+      Body: {}
+      Bucket: MyData
+      Key: MyData
+    Resource: arn:aws:states:::aws-sdk:s3:putObject
+  metadados do pedido:
+    Type: Task
+    Next: ProcessarPagamento
+    Parameters:
+      RequestItems:
+        Key:
+          Keys:
+            - {}
+    Resource: arn:aws:states:::aws-sdk:dynamodb:batchGetItem
+  ProcessarPagamento:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    OutputPath: $.Payload
+    Parameters:
+      Payload.$: $
+      FunctionName: arn:aws:states:::lambda:invoke
+    Retry:
+      - ErrorEquals:
+          - Lambda.ServiceException
+          - Lambda.AWSLambdaException
+          - Lambda.SdkClientException
+          - Lambda.TooManyRequestsException
+        IntervalSeconds: 1
+        MaxAttempts: 3
+        BackoffRate: 2
+    Next: NotificarCliente
+  NotificarCliente:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    OutputPath: $.Payload
+    Parameters:
+      Payload.$: $
+      FunctionName.$: $.notificacaoCliente
+    Retry:
+      - ErrorEquals:
+          - Lambda.ServiceException
+          - Lambda.AWSLambdaException
+          - Lambda.SdkClientException
+          - Lambda.TooManyRequestsException
+        IntervalSeconds: 1
+        MaxAttempts: 3
+        BackoffRate: 2
+    Next: EnviarPorSES
+  EnviarPorSES:
+    Type: Task
+    Resource: arn:aws:states:::aws-sdk:ses:sendEmail
+    Parameters:
+      TopicArn: $.notificacaoCliente
+      Message.$: $
+    Next: ChamaoBedrock
+  ChamaoBedrock:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    OutputPath: $.Payload
+    Parameters:
+      Payload.$: $
+      FunctionName.$: $.inputsBedrock
+    Retry:
+      - ErrorEquals:
+          - Lambda.ServiceException
+          - Lambda.AWSLambdaException
+          - Lambda.SdkClientException
+          - Lambda.TooManyRequestsException
+        IntervalSeconds: 1
+        MaxAttempts: 3
+        BackoffRate: 2
+    Next: ExecutaModeloBedrock
+  ExecutaModeloBedrock:
+    Type: Task
+    Resource: arn:aws:states:::bedrock:invokeModel
+    Parameters:
+      Body:
+        prompt: |-
+          Human:<prompt>
+          Assistant:
+        max_tokens_to_sample: 200
+      ModelId: ${LambdaFunction1}
+    Next: AgendarEntrega
+  AgendarEntrega:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    OutputPath: $.Payload
+    Parameters:
+      Payload.$: $
+      FunctionName: arn:aws:states:::lambda:invoke
+    Retry:
+      - ErrorEquals:
+          - Lambda.ServiceException
+          - Lambda.AWSLambdaException
+          - Lambda.SdkClientException
+          - Lambda.TooManyRequestsException
+        IntervalSeconds: 1
+        MaxAttempts: 3
+        BackoffRate: 2
+    End: true
